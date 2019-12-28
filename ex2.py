@@ -79,22 +79,26 @@ class WumpusController:
             return False
         return True
 
-    def is_ok_move(self, curr_tile, direction):  # just checking if safe&not been at
+    def is_ok_move(self, curr_tile, direction, partial_map):  # just checking if safe&not been at
         dir_tup = self.directions[direction]
-        if self.map_dict[t_add(dir_tup, curr_tile)].WALL:
+        destination = t_add(dir_tup, curr_tile)
+        if self.map_dict[destination].WALL or (11 <= partial_map[destination[0]-1][destination[1]-1] <= 14):
             return False
         if self.map_dict[t_add(dir_tup, curr_tile)].SAFE and self.map_dict[t_add(dir_tup, curr_tile)].been_at == 0:
             #print(f"location is {t_add(dir_tup, curr_tile)}")
             return True
         return False
 
-    #  TODO : if stench - > shoot if didn't shoot already, if coor+dir != (WALL OR SAFE)  - Done
-    #  more TODO: update SAFE tiles for heroes with no observations
-    #  TODO glitter+SAFE+been_at ==0 => GO! (after checking if tile.GOLD == True)
-    #  TODO don't step on other heroes!
-    #  TODO before moving mark tile as safe and not only been_at += 1
+    # TODO: if stench - > shoot if didn't shoot already, if coor+dir != (WALL OR SAFE)  - Done
+    # TODO: update SAFE tiles for heroes with no observations - Done
+    # TODO: glitter+SAFE+been_at ==0 => GO! (after checking if tile.GOLD == True)
+    # TODO: don't step on other heroes! - Done
+    # TODO: before moving mark tile as safe and not only been_at += 1 - Need to remember&verify for each heuristic
+    # TODO: do something like "self.not_afraid_of_monsters = True" depending on # of heroes left
+    # TODO: do something like breeze and died => map_dict[tile_coordinates].PIT=True
+    # TODO: add conclusions for observations also with 2-Manhattan-Distance tiles
+    # TODO: add moves based on "probably pit"
     def get_next_action(self, partial_map, observations):
-        print(self.heroes)  # TODO -DELETE
         print(observations)
         # ---------- choosing hero to go with ---------- #
 
@@ -137,7 +141,7 @@ class WumpusController:
         # ---------- Actual movement heuristic ---------- #
 
         for direction in self.directions:
-            if self.is_ok_move(curr_hero_coor, direction):
+            if self.is_ok_move(curr_hero_coor, direction, partial_map):
                 action = 'move', curr_hero, direction
                 self.last_action = action
                 self.map_dict[curr_hero_coor].been_at += 1
@@ -149,11 +153,13 @@ class WumpusController:
         # self.prev_map = partial_map   - probably don't need
         # --------- Going random direction --------- #
         for direction in self.directions:
-            if self.map_dict[t_add(self.directions[direction], curr_hero_coor)].WALL:
+            curr_destination = t_add(self.directions[direction], curr_hero_coor)
+            if self.map_dict[curr_destination].WALL or (11 <= partial_map[curr_destination[0]-1][curr_destination[1]-1] <= 14):
                 continue
             self.heroes[curr_hero] = t_add(curr_hero_coor, self.directions[direction])
             print(f"i did {('move', curr_hero, direction)} by default")
             self.map_dict[curr_hero_coor].been_at += 1
+            self.map_dict[curr_hero_coor].SAFE = True
             self.last_action = 'move', curr_hero, direction
             return 'move', curr_hero, direction  # just default to see how it runs
 
