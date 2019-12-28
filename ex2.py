@@ -1,7 +1,7 @@
 from collections import defaultdict
 import random
 
-ids = ["323263442", "312485816"]
+ids = ["323263442", "312485816"]  # CHECKING
 
 
 def opposite_direction(some_direction):
@@ -15,7 +15,7 @@ def t_add(tup1, tup2):
 class TileKB:
     def __init__(self, initial_type):
         self.KB_dict = defaultdict(lambda: False)
-        self.been_at = 0
+        self.been_at = 0  # counting how much times a hero stepped here, updates after moving
         self.WALL = False
         self.GOLD = False
         if 11 <= initial_type <= 14:
@@ -46,6 +46,7 @@ class WumpusController:
         self.prev_map = None
         self.prev_obs = None
         self.last_action = None
+        self.last_direction = {}  # maybe useful to know to which direction a hero went last
         self.directions = {
             'U': (-1, 0),
             'D': (1, 0),
@@ -63,13 +64,17 @@ class WumpusController:
                 self.map_dict[(row+1, col+1)] = TileKB(entity)
                 if 11 <= entity <= 14:
                     self.heroes[entity] = (row+1, col+1)
+                    self.last_direction[entity] = None
         for col in range(col_num+2):
             self.map_dict[(0, col)], self.map_dict[(row_num+1, col)] = TileKB(20), TileKB(20)  # horizontal walls
 
         # Timeout: 60 seconds
 
+
+    #  TODO : if stench - > shoot if didn't shoot already, if coor+dir != (WALL OR SAFE)
+    #  more TODO: update SAFE tiles for heroes with no observations
+    #  TODO glitter+SAFE+been_at ==0 => GO! (after checking if tile.GOLD == True)
     def get_next_action(self, partial_map, observations):
-        # TODO if hero died, update it
         if self.last_action is None:
             curr_hero = random.choice(self.heroes.keys())
         else:
@@ -77,14 +82,21 @@ class WumpusController:
             if partial_map(self.heroes[curr_hero]) != curr_hero:  # means the hero is dead
                 self.heroes.pop(curr_hero)
                 curr_hero = random.choice(self.heroes.keys())  # I assume it won't be empty cuz game would've stopped
-        for observation in observations:
+        for observation in observations:  # updating our KB
             coordinate = observation[0]
             obs = observation[1]
+            hero = partial_map[coordinate[0]][coordinate[1]]
+            last_dir = self.last_direction[hero]
+            if self.last_action != ('shoot', hero, last_dir):
+
             for direction in self.directions:
                 self.map_dict[t_add(coordinate, self.directions[direction])].update_after_obs(opposite_direction(direction), obs)
+
+
+
         self.prev_map = partial_map
         return 'move', 11, 'R'
-        # TODO: before returning next, let's update been_at for the KBs
+        # TODO: before returning next, let's update been_at for the KBs and "came_from"
         # Timeout: 5 seconds
 
 
