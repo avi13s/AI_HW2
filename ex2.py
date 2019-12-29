@@ -5,7 +5,7 @@ ids = ["323263442", "312485816"]  # CHECKING
 
 
 def opposite_direction(some_direction):
-    return {'L': 'R', 'R': 'L', 'U': 'D', 'D': 'U'}.get(some_direction)
+    return {'L': 'R', 'R': 'L', 'U': 'D', 'D': 'U', 'LL': 'RR', 'RR': 'LL', 'UU': 'DD', 'DD': 'UU'}.get(some_direction)
 
 
 def t_add(tup1, tup2):
@@ -32,6 +32,7 @@ class TileKB:
             self.KB_dict['B'+obs_from_dir] = True
             if self.KB_dict['B'+opposite_direction(obs_from_dir)]:
                 self.KB_dict['P_PIT'] = True
+
         elif obs == 'stench':
             self.KB_dict['S'+obs_from_dir] = True
         elif obs == 'glitter':
@@ -45,6 +46,9 @@ class TileKB:
 
 class WumpusController:
     def __init__(self, initial_map, initial_observations):
+        #print(initial_map)
+        self.row_num = len(initial_map)+2  # including walls
+        self.col_num = len(initial_map[0])+2
         self.prev_map = None
         self.prev_obs = None
         self.last_action = None
@@ -71,23 +75,65 @@ class WumpusController:
             self.map_dict[(0, col)], self.map_dict[(row_num+1, col)] = TileKB(20), TileKB(20)  # horizontal walls
         # Timeout: 60 seconds
 
-    def should_i_shoot(self, curr_tile, direction):  # curr_tile is tuple of coordinates, direction is 'L'/'R'/'U'/'D'
+    def is_in_map(self, coordinates_tuple):
+        if coordinates_tuple[0] <= 0 or coordinates_tuple[0] >= self.row_num-1:
+            return False
+        if coordinates_tuple[1] <= 0 or coordinates_tuple[1] >= self.col_num-1:
+            return False
+        return True
+
+    def should_i_shoot(self, curr_tile, direction, partial_map):  # curr_tile is tuple of coordinates, direction is 'L'/'R'/'U'/'D'
         if direction in self.map_dict[curr_tile].shot_to_dir:
             return False
         dir_tup = self.directions[direction]
-        if self.map_dict[t_add(dir_tup, curr_tile)].WALL or self.map_dict[t_add(dir_tup, curr_tile)].SAFE:
+        destination = t_add(dir_tup, curr_tile)
+        if self.map_dict[destination].WALL or self.map_dict[destination].SAFE:
             return False
+        destination = t_add(destination, dir_tup)
+        """while not self.map_dict[destination].WALL:
+            if 11 <= partial_map[destination[0]-1][destination[1]-1] <= 14:
+                return False
+            destination = t_add(destination, dir_tup)"""
         return True
 
     def is_ok_move(self, curr_tile, direction, partial_map):  # just checking if safe&not been at
         dir_tup = self.directions[direction]
         destination = t_add(dir_tup, curr_tile)
-        if self.map_dict[destination].WALL or (11 <= partial_map[destination[0]-1][destination[1]-1] <= 14):
+        #print(f"meaning destination in p_map is {destination[0]-1,destination[1]-1}")
+        if not self.is_in_map(destination):
             return False
+        if self.map_dict[destination].WALL or (11 <= partial_map[destination[0]-1][destination[1]-1] <= 14):
+            #print(f"i said not okay to go to {direction} cuz stepping on hero")
+            return False
+        #print(f"i said that in {destination} there's no hero, entity there is {partial_map[destination[0]-1][destination[1]-1]}")
         if self.map_dict[t_add(dir_tup, curr_tile)].SAFE and self.map_dict[t_add(dir_tup, curr_tile)].been_at == 0:
             #print(f"location is {t_add(dir_tup, curr_tile)}")
             return True
         return False
+
+    def update_after_move(self, action):
+        hero, direction = action[1], action[2]
+        hero_coor = self.heroes[hero]
+        destination = t_add(hero_coor, self.directions[direction])
+        self.heroes[hero] = destination
+        self.last_action = action
+        self.map_dict[hero_coor].been_at += 1
+        self.map_dict[destination].SAFE = True
+        #print(f"i did {action}")
+        return
+
+    def glitter_procedure(self, hero, coordinates, partial_map):
+        for direction in self.directions:
+            action = 'move', hero, direction
+            if self.is_ok_move(coordinates, direction, partial_map):
+                return action
+        for direction in self.directions:  # lowering standards
+            action = 'move', hero, direction
+            destination = t_add(coordinates, self.directions[direction])
+            destination_KB = self.map_dict[destination]
+            if destination_KB.been_at == 0 and not(destination_KB.WALL or (11 <= partial_map[destination[0]-1][destination[1]-1] <= 14)):
+                return action
+        return 'no_action'
 
     # TODO: if stench - > shoot if didn't shoot already, if coor+dir != (WALL OR SAFE)  - Done
     # TODO: update SAFE tiles for heroes with no observations - Done
@@ -99,7 +145,7 @@ class WumpusController:
     # TODO: add conclusions for observations also with 2-Manhattan-Distance tiles
     # TODO: add moves based on "probably pit"
     def get_next_action(self, partial_map, observations):
-        print(observations)
+        # print(observations)
         # ---------- choosing hero to go with ---------- #
 
         if self.last_action is None:
@@ -123,45 +169,54 @@ class WumpusController:
             hero = partial_map[coordinate[0]-1][coordinate[1]-1]
             if obs != 'glitter':
                 heroes_with_obs.append(hero)
+            else:
+                glitter_action = self.glitter_procedure(hero, coordinate, partial_map)
+                if glitter_action != 'no_action':
+                    self.update_after_move(glitter_action)
+                    return glitter_action
             if obs == 'stench':
                 for direction in self.directions.keys():
-                    if self.should_i_shoot(coordinate, direction):
+                    if self.should_i_shoot(coordinate, direction, partial_map):
                         self.map_dict[coordinate].shot_to_dir.append(direction)  # making sure not to shoot twice from same tile to same direction
-                        print(f"i did {('shoot', hero, direction)}")
+                        #print(f"i did {('shoot', hero, direction)}")
                         self.last_action = ('shoot', hero, direction)
                         return 'shoot', hero, direction
             for direction in self.directions:   # don't have to update if I shot something, because we'll stay at the same place
-                self.map_dict[t_add(coordinate, self.directions[direction])].update_after_obs(opposite_direction(direction), obs)
+                next_to_tile = t_add(coordinate, self.directions[direction])
+                self.map_dict[next_to_tile].update_after_obs(opposite_direction(direction), obs)
+                next_next_to_tile = t_add(next_to_tile, self.directions[direction])  # want to update tile with dist of 2 also
+                if self.is_in_map(next_next_to_tile):
+                    self.map_dict[next_next_to_tile].update_after_obs(2*opposite_direction(direction), obs)
 
         for hero in self.heroes:  # updating tiles near heroes with no observations as safe (no breeze, no stench means safe)
             if hero not in heroes_with_obs:
                 for direction in self.directions:
-                    self.map_dict[t_add(self.heroes[hero], self.directions[direction])].SAFE = True
+                    destination = t_add(self.heroes[hero], self.directions[direction])
+                    self.map_dict[destination].SAFE = True
 
         # ---------- Actual movement heuristic ---------- #
-
-        for direction in self.directions:
+        shuffled_directions = random.sample(list(self.directions.keys()), 4)
+        #print(shuffled_directions)
+        for direction in shuffled_directions:
+            potential_action = 'move', curr_hero, direction
+            #print(f"asking about {direction}")
             if self.is_ok_move(curr_hero_coor, direction, partial_map):
-                action = 'move', curr_hero, direction
-                self.last_action = action
-                self.map_dict[curr_hero_coor].been_at += 1
-                # print(f"location = {curr_hero_coor} and been_at ={self.map_dict[curr_hero_coor].been_at}")
-                self.map_dict[curr_hero_coor].SAFE = True
-                self.heroes[curr_hero] = t_add(self.directions[direction], curr_hero_coor)
-                print(f"i did {action}")
-                return action
+                self.update_after_move(potential_action)
+                #print("chose from safe&not been at")
+                return potential_action
+            # else:
+            #   print(f"{potential_action} wasn't ok move")
         # self.prev_map = partial_map   - probably don't need
-        # --------- Going random direction --------- #
-        for direction in self.directions:
+
+        # --------- Going random direction, avoiding possible pits --------- #
+        for direction in shuffled_directions:
             curr_destination = t_add(self.directions[direction], curr_hero_coor)
             if self.map_dict[curr_destination].WALL or (11 <= partial_map[curr_destination[0]-1][curr_destination[1]-1] <= 14):
                 continue
-            self.heroes[curr_hero] = t_add(curr_hero_coor, self.directions[direction])
-            print(f"i did {('move', curr_hero, direction)} by default")
-            self.map_dict[curr_hero_coor].been_at += 1
-            self.map_dict[curr_hero_coor].SAFE = True
-            self.last_action = 'move', curr_hero, direction
-            return 'move', curr_hero, direction  # just default to see how it runs
+            action = 'move', curr_hero, direction
+            self.update_after_move(action)
+            #print("chose from default")
+            return action  # just default to see how it runs
 
         # TODO: before returning next, let's update been_at for the KBs and "came_from"
         # Timeout: 5 seconds
