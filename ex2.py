@@ -21,6 +21,7 @@ class TileKB:
         self.GOLD = False
         self.shot_to_dir = []
         self.breeze_around = 0
+        self.stench_around = 0
         if 11 <= initial_type <= 14:
             self.SAFE = True
         if initial_type == 20:
@@ -37,6 +38,10 @@ class TileKB:
                     self.breeze_around += 1
         elif obs == 'stench':
             self.KB_dict['S'+obs_from_dir] = True
+            self.stench_around = 0
+            for direction in ['U', 'D', 'L', 'R']:
+                if self.KB_dict['S'+direction]:
+                    self.stench_around += 1
         elif obs == 'glitter':
             self.KB_dict['G'+obs_from_dir] = True
             if self.KB_dict['G'+opposite_direction(obs_from_dir)]:  # I assume ['glitter', 'tile', 'glitter'] => gold in the tile
@@ -75,6 +80,8 @@ class WumpusController:
                     self.last_direction[entity] = None
         for col in range(col_num+2):
             self.map_dict[(0, col)], self.map_dict[(row_num+1, col)] = TileKB(20), TileKB(20)  # horizontal walls
+        self.can_risk = True if len(self.heroes) > 1 else False
+
         # Timeout: 60 seconds
 
     def is_in_map(self, coordinates_tuple):
@@ -98,18 +105,15 @@ class WumpusController:
             destination = t_add(destination, dir_tup)
         return True
 
-    def is_ok_move(self, curr_tile, direction, partial_map):  # just checking if safe&not been at
+    def is_ok_move(self, curr_tile, direction, partial_map, max_breeze, max_been_at):  # just checking if safe&not been at&not wall
         dir_tup = self.directions[direction]
         destination = t_add(dir_tup, curr_tile)
-        #print(f"meaning destination in p_map is {destination[0]-1,destination[1]-1}")
-        if not self.is_in_map(destination):
+        destination_KB = self.map_dict[destination]
+        if not self.is_in_map(destination) :
             return False
-        if self.map_dict[destination].WALL or (11 <= partial_map[destination[0]-1][destination[1]-1] <= 14):
-            #print(f"i said not okay to go to {direction} cuz stepping on hero")
+        if destination_KB.WALL or (11 <= partial_map[destination[0]-1][destination[1]-1] <= 14):
             return False
-        #print(f"i said that in {destination} there's no hero, entity there is {partial_map[destination[0]-1][destination[1]-1]}")
-        if self.map_dict[t_add(dir_tup, curr_tile)].SAFE and self.map_dict[t_add(dir_tup, curr_tile)].been_at == 0:
-            #print(f"location is {t_add(dir_tup, curr_tile)}")
+        if destination_KB.been_at <= max_been_at and destination_KB.breeze_around <= max_breeze:
             return True
         return False
 
@@ -121,15 +125,15 @@ class WumpusController:
         self.last_action = action
         self.map_dict[hero_coor].been_at += 1
         self.map_dict[destination].SAFE = True
-        #print(f"i did {action}")
+        #print(f"i did {action} from {hero_coor} to {destination}")
         return
 
     def glitter_procedure(self, hero, coordinates, partial_map):
         for direction in self.directions:
             action = 'move', hero, direction
-            if self.is_ok_move(coordinates, direction, partial_map):
+            if self.is_ok_move(coordinates, direction, partial_map, 0, 0):
                 return action
-        for direction in self.directions:  # lowering standards
+        for direction in self.directions:  # lowering standards to unsafe tiles
             action = 'move', hero, direction
             destination = t_add(coordinates, self.directions[direction])
             destination_KB = self.map_dict[destination]
@@ -149,16 +153,19 @@ class WumpusController:
     def get_next_action(self, partial_map, observations):
         # print(observations)
         # ---------- choosing hero to go with ---------- #
-
         if self.last_action is None:
             curr_hero = random.choice(list(self.heroes.keys()))
         else:
             curr_hero = self.last_action[1]
             curr_hero_coor = self.heroes[curr_hero]
             if partial_map[curr_hero_coor[0]-1][curr_hero_coor[1]-1] != curr_hero:  # means the hero from last move is dead
+                #print(f"hero {curr_hero} died and situation is: {self.heroes}, map:\n {partial_map}")
                 self.heroes.pop(curr_hero)
                 if len(self.heroes) == 0:
+                    print("i recon that game over")
                     return 'move', 11, 'R'  # we're dead anyway
+                elif len(self.heroes) <= 1:
+                    self.can_risk = False
                 curr_hero = random.choice(list(self.heroes))  # already checked that it's not empty
         curr_hero_coor = self.heroes[curr_hero]
 
@@ -172,9 +179,11 @@ class WumpusController:
             if obs != 'glitter':
                 heroes_with_obs.append(hero)
             else:
+                print("spotted glitter")
                 glitter_action = self.glitter_procedure(hero, coordinate, partial_map)
                 if glitter_action != 'no_action':
                     self.update_after_move(glitter_action)
+                    print(f"did {glitter_action} as glitter action")
                     return glitter_action
             if obs == 'stench':
                 for direction in self.directions.keys():
@@ -198,27 +207,64 @@ class WumpusController:
 
         # ---------- Actual movement heuristic ---------- #
         shuffled_directions = random.sample(list(self.directions.keys()), 4)
-        #print(shuffled_directions)
+
+        # --------------- 1st priority action(safe&unexplored) --------------- #
+
         for direction in shuffled_directions:
             potential_action = 'move', curr_hero, direction
-            #print(f"asking about {direction}")
-            if self.is_ok_move(curr_hero_coor, direction, partial_map):
+            if self.is_ok_move(curr_hero_coor, direction, partial_map, 0, 0):
                 self.update_after_move(potential_action)
                 #print("chose from safe&not been at")
                 return potential_action
-            # else:
-            #   print(f"{potential_action} wasn't ok move")
-        # self.prev_map = partial_map   - probably don't need
+
+        # --------------- 2nd priority action(safe&explored,same hero) --------------- #
+
+        for direction in shuffled_directions:
+            potential_action = 'move', curr_hero, direction
+            if self.is_ok_move(curr_hero_coor, direction, partial_map, 0, 1):
+                self.update_after_move(potential_action)
+                #print("chose from safe&not been at")
+                return potential_action
+
+        # --------------- 3rd priority action(suicidal if there's more than one hero left) --------------- #
+
+        if self.can_risk:
+            min_risk = 1000  # random big num
+            chosen_action = 'no_action'
+            for direction in shuffled_directions:
+                destination = t_add(curr_hero_coor, self.directions[direction])
+                destination_KB = self.map_dict[destination]
+                curr_risk = destination_KB.breeze_around+destination_KB.stench_around
+                if curr_risk < min_risk and not (destination_KB.WALL or 11 <= partial_map[destination[0]-1][destination[1]-1] <= 14):
+                    min_risk = curr_risk
+                    chosen_action = 'move', curr_hero, direction
+            if chosen_action != 'no_action':
+                self.update_after_move(chosen_action)
+                return chosen_action
 
         # --------- Going random direction, avoiding possible pits --------- #
+
+        for max_breeze in range(1, 5):
+            for curr_hero in self.heroes.keys():
+                curr_hero_coor = self.heroes[curr_hero]
+                for direction in shuffled_directions:
+                    curr_destination = t_add(self.directions[direction], curr_hero_coor)
+                    if self.map_dict[curr_destination].WALL or (11 <= partial_map[curr_destination[0]-1][curr_destination[1]-1] <= 14)\
+                            or self.map_dict[curr_destination].breeze_around >= max_breeze or self.map_dict[curr_destination].been_at >= 3:
+                        continue
+                    action = 'move', curr_hero, direction
+                    self.update_after_move(action)
+                    #print(f"max breeze is {max_breeze}")
+                    return action  # just default to see how it runs
+
+        # in case no action chosen:
         for direction in shuffled_directions:
             curr_destination = t_add(self.directions[direction], curr_hero_coor)
-            if self.map_dict[curr_destination].WALL or (11 <= partial_map[curr_destination[0]-1][curr_destination[1]-1] <= 14):
+            if self.map_dict[curr_destination].WALL or (11 <= partial_map[curr_destination[0] - 1][curr_destination[1] - 1] <= 14) \
+                    or self.map_dict[curr_destination].breeze_around >= 5 or self.map_dict[curr_destination].been_at >= 4:
                 continue
             action = 'move', curr_hero, direction
             self.update_after_move(action)
-            #print("chose from default")
             return action  # just default to see how it runs
-
         # TODO: before returning next, let's update been_at for the KBs and "came_from"
         # Timeout: 5 seconds
