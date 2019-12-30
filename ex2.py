@@ -46,6 +46,7 @@ class TileKB:
             self.KB_dict['G'+obs_from_dir] = True
             if self.KB_dict['G'+opposite_direction(obs_from_dir)]:  # I assume ['glitter', 'tile', 'glitter'] => gold in the tile
                 self.GOLD = True
+                print("i know where the gold is")
         else:
             print('got undefined observation for some reason')
             return
@@ -113,7 +114,7 @@ class WumpusController:
             return False
         if destination_KB.WALL or (11 <= partial_map[destination[0]-1][destination[1]-1] <= 14):
             return False
-        if destination_KB.been_at <= max_been_at and destination_KB.breeze_around <= max_breeze:
+        if destination_KB.been_at <= max_been_at and (destination_KB.breeze_around <= max_breeze or destination_KB.SAFE):
             return True
         return False
 
@@ -131,9 +132,13 @@ class WumpusController:
     def glitter_procedure(self, hero, coordinates, partial_map):
         for direction in self.directions:
             action = 'move', hero, direction
+            destination = t_add(coordinates, self.directions[direction])
+            destination_KB = self.map_dict[destination]
+            if destination_KB.GOLD:
+                return action
             if self.is_ok_move(coordinates, direction, partial_map, 0, 0):
                 return action
-        for direction in self.directions:  # lowering standards to unsafe tiles
+        for direction in self.directions:  # lowering standards to less safe tiles
             action = 'move', hero, direction
             destination = t_add(coordinates, self.directions[direction])
             destination_KB = self.map_dict[destination]
@@ -162,11 +167,18 @@ class WumpusController:
                 #print(f"hero {curr_hero} died and situation is: {self.heroes}, map:\n {partial_map}")
                 self.heroes.pop(curr_hero)
                 if len(self.heroes) == 0:
-                    print("i recon that game over")
+                    #print("i recon that game over")
                     return 'move', 11, 'R'  # we're dead anyway
                 elif len(self.heroes) <= 1:
                     self.can_risk = False
                 curr_hero = random.choice(list(self.heroes))  # already checked that it's not empty
+            if self.last_action[0] == 'shoot' and (curr_hero_coor, 'stench') not in observations:  # updating killed wumpus tile as safe
+                print(f"i recon i killed wumpus with shot from {curr_hero_coor}")
+                shot_at_dir = self.directions[self.last_action[2]]
+                shot_at = t_add(curr_hero_coor, shot_at_dir)
+                shot_at = t_add(shot_at, shot_at_dir)
+                print(f"wumpus was at {shot_at}")
+                self.map_dict[shot_at].SAFE = True
         curr_hero_coor = self.heroes[curr_hero]
 
         # ----- looking at observations, updating KB accordingly after shooting if there's stench ----- #
@@ -216,8 +228,10 @@ class WumpusController:
                 self.update_after_move(potential_action)
                 #print("chose from safe&not been at")
                 return potential_action
+            #else:
+                #print(f"{potential_action} didn't seem safe")
 
-        # --------------- 2nd priority action(safe&explored,same hero) --------------- #
+        # --------------- 2nd priority action(safe&explored once,same hero) --------------- #
 
         for direction in shuffled_directions:
             potential_action = 'move', curr_hero, direction
