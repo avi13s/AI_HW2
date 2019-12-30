@@ -20,6 +20,7 @@ class TileKB:
         self.WALL = False
         self.GOLD = False
         self.shot_to_dir = []
+        self.breeze_around = 0
         if 11 <= initial_type <= 14:
             self.SAFE = True
         if initial_type == 20:
@@ -30,9 +31,10 @@ class TileKB:
             return
         if obs == 'breeze':
             self.KB_dict['B'+obs_from_dir] = True
-            if self.KB_dict['B'+opposite_direction(obs_from_dir)]:
-                self.KB_dict['P_PIT'] = True
-
+            self.breeze_around = 0
+            for direction in ['U', 'D', 'L', 'R']:
+                if self.KB_dict['B'+direction]:
+                    self.breeze_around += 1
         elif obs == 'stench':
             self.KB_dict['S'+obs_from_dir] = True
         elif obs == 'glitter':
@@ -90,10 +92,10 @@ class WumpusController:
         if self.map_dict[destination].WALL or self.map_dict[destination].SAFE:
             return False
         destination = t_add(destination, dir_tup)
-        """while not self.map_dict[destination].WALL:
+        while not self.map_dict[destination].WALL:
             if 11 <= partial_map[destination[0]-1][destination[1]-1] <= 14:
                 return False
-            destination = t_add(destination, dir_tup)"""
+            destination = t_add(destination, dir_tup)
         return True
 
     def is_ok_move(self, curr_tile, direction, partial_map):  # just checking if safe&not been at
@@ -220,12 +222,3 @@ class WumpusController:
 
         # TODO: before returning next, let's update been_at for the KBs and "came_from"
         # Timeout: 5 seconds
-
-
-
-
-
-
-
-
-
