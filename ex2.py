@@ -22,6 +22,7 @@ class TileKB:
         self.shot_to_dir = []
         self.breeze_around = 0
         self.stench_around = 0
+        self.walls_around = 0  # can help to predict if this is a pit
         if 11 <= initial_type <= 14:
             self.SAFE = True
         if initial_type == 20:
@@ -92,6 +93,12 @@ class WumpusController:
             return False
         return True
 
+    def check_for_2_breeze_tile(self, coordinates):
+        for direction in list(self.directions.values()):
+            destionation_KB = self.map_dict[t_add(direction, coordinates)]
+            if destionation_KB.breeze_around >= 2:
+                return True
+
     def should_i_shoot(self, curr_tile, direction, partial_map):  # curr_tile is tuple of coordinates, direction is 'L'/'R'/'U'/'D'
         if direction in self.map_dict[curr_tile].shot_to_dir:
             return False
@@ -148,15 +155,16 @@ class WumpusController:
 
     # TODO: if stench - > shoot if didn't shoot already, if coor+dir != (WALL OR SAFE)  - Done
     # TODO: update SAFE tiles for heroes with no observations - Done
-    # TODO: glitter+SAFE+been_at ==0 => GO! (after checking if tile.GOLD == True)
+    # TODO: glitter+SAFE+been_at ==0 => GO! (after checking if tile.GOLD == True) - Done
     # TODO: don't step on other heroes! - Done
     # TODO: before moving mark tile as safe and not only been_at += 1 - Need to remember&verify for each heuristic
-    # TODO: do something like "self.not_afraid_of_monsters = True" depending on # of heroes left
+    # TODO: do something like "self.not_afraid_of_monsters = True" depending on # of heroes left - Done "self.can_risk"
     # TODO: do something like breeze and died => map_dict[tile_coordinates].PIT=True
     # TODO: add conclusions for observations also with 2-Manhattan-Distance tiles
-    # TODO: add moves based on "probably pit"
+    # TODO: add moves based on "probably pit" and "pit" if breeze+walls around is >=3 or if observation was breeze and hero died
+
     def get_next_action(self, partial_map, observations):
-        # print(observations)
+        print(observations)
         # ---------- choosing hero to go with ---------- #
         if self.last_action is None:
             curr_hero = random.choice(list(self.heroes.keys()))
@@ -173,11 +181,9 @@ class WumpusController:
                     self.can_risk = False
                 curr_hero = random.choice(list(self.heroes))  # already checked that it's not empty
             if self.last_action[0] == 'shoot' and (curr_hero_coor, 'stench') not in observations:  # updating killed wumpus tile as safe
-                print(f"i recon i killed wumpus with shot from {curr_hero_coor}")
                 shot_at_dir = self.directions[self.last_action[2]]
                 shot_at = t_add(curr_hero_coor, shot_at_dir)
                 shot_at = t_add(shot_at, shot_at_dir)
-                print(f"wumpus was at {shot_at}")
                 self.map_dict[shot_at].SAFE = True
         curr_hero_coor = self.heroes[curr_hero]
 
@@ -218,6 +224,7 @@ class WumpusController:
                     self.map_dict[destination].SAFE = True
 
         # ---------- Actual movement heuristic ---------- #
+
         shuffled_directions = random.sample(list(self.directions.keys()), 4)
 
         # --------------- 1st priority action(safe&unexplored) --------------- #
@@ -232,10 +239,16 @@ class WumpusController:
                 #print(f"{potential_action} didn't seem safe")
 
         # --------------- 2nd priority action(safe&explored once,same hero) --------------- #
+        max_been_at = 1
+        max_breeze = 0
+        if (curr_hero_coor, 'breeze') in observations:
+            if self.check_for_2_breeze_tile(curr_hero_coor):
+                max_breeze = 1
+                max_been_at = 0
 
         for direction in shuffled_directions:
             potential_action = 'move', curr_hero, direction
-            if self.is_ok_move(curr_hero_coor, direction, partial_map, 0, 1):
+            if self.is_ok_move(curr_hero_coor, direction, partial_map, max_breeze, max_been_at):
                 self.update_after_move(potential_action)
                 #print("chose from safe&not been at")
                 return potential_action
