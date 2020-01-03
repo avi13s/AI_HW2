@@ -42,7 +42,7 @@ class TileKB:
             if ((self.breeze_around == 3 and self.walls_around == 1) or (self.breeze_around == 4)) and (not self.SAFE):
                 self.PIT = True
             elif self.breeze_around >= 2 and (not self.SAFE):
-                #print(f"declared something from {obs_from_dir} as probably pit")
+                ##print(f"declared something from {obs_from_dir} as probably pit")
                 self.P_PIT = True  # probably pit
         elif obs == 'stench':
             self.KB_dict['S'+obs_from_dir] = True
@@ -54,9 +54,9 @@ class TileKB:
             self.KB_dict['G'+obs_from_dir] = True
             if self.KB_dict['G'+opposite_direction(obs_from_dir)]:  # I assume ['glitter', 'tile', 'glitter'] => gold in the tile
                 self.GOLD = True
-                #print("i know where the gold is")
+                ##print("i know where the gold is")
         else:
-            #print('got undefined observation for some reason')
+            ##print('got undefined observation for some reason')
             return
 
 
@@ -110,7 +110,7 @@ class WumpusController:
         for direction in list(self.directions.values()):
             destionation_KB = self.map_dict[t_add(direction, coordinates)]
             if destionation_KB.P_PIT or destionation_KB.PIT:
-                #print(f"the pit is probably elsewhere and not in {coordinates}")
+                ##print(f"the pit is probably elsewhere and not in {coordinates}")
                 return True
 
     def should_i_shoot(self, curr_tile, direction, partial_map):  # curr_tile is tuple of coordinates, direction is 'L'/'R'/'U'/'D'
@@ -118,7 +118,10 @@ class WumpusController:
             return False
         dir_tup = self.directions[direction]
         destination = t_add(dir_tup, curr_tile)
+        two_dist_destination = t_add(dir_tup, destination)
         if self.map_dict[destination].WALL or self.map_dict[destination].SAFE:
+            return False
+        if self.map_dict[two_dist_destination].WALL:
             return False
         destination = t_add(destination, dir_tup)
         while not self.map_dict[destination].WALL:
@@ -179,7 +182,7 @@ class WumpusController:
     # TODO: add moves based on "probably pit" and "pit" if breeze+walls around is >=3 or if observation was breeze and hero died
 
     def get_next_action(self, partial_map, observations):
-        #random.seed(10000000000000000000000000000000000000000000000000000000000000)
+        #random.seed(1000)
         ##print(observations)
         # ---------- choosing hero to go with ---------- #
         if self.last_action is None:
@@ -243,7 +246,7 @@ class WumpusController:
         # ---------- Actual movement heuristic, first of all, trying to get gold ---------- #
 
         if self.felt_glitter:
-            #print("i know i felt glitter before")
+            ##print("i know i felt glitter before")
             for direction in self.directions:
                 destination = t_add(self.directions[direction], curr_hero_coor)
                 if destination == self.felt_glitter:
@@ -262,43 +265,118 @@ class WumpusController:
                 ##print("chose from safe&not been at")
                 return potential_action
             #else:
-                ##print(f"{potential_action} didn't seem safe")
+                ###print(f"{potential_action} didn't seem safe")
 
         # --------------- 2nd priority action(safe&explored once unless there's probably a passage near a pit) --------------- #
-        max_been_at = 1
+        ###print("trying 2nd priority")
+        max_been_at = 3
         max_breeze = 0
         max_stench = 0
         exact_breeze = 0
         if (curr_hero_coor, 'breeze') in observations:
+            if self.map_dict[curr_hero_coor].been_at[curr_hero] == 0:  # maybe better action if traversing back 1 step
+                if self.last_action is not None and (not self.check_for_danger_around(curr_hero_coor)):
+                    destination = t_add(self.directions[opposite_direction(self.last_action[2])], curr_hero_coor)
+                    if sum(self.map_dict[destination].been_at.values()) == 1:
+                        traverse_action = 'move', curr_hero, opposite_direction(self.last_action[2])
+                        self.update_after_move(traverse_action)
+                        return traverse_action
+
             if self.check_for_danger_around(curr_hero_coor):
-                ##print(f"checked {curr_hero_coor} and there was")
+                ###print(f"checked {curr_hero_coor} and there was")
                 max_breeze = 1
-                max_been_at = 0
+                max_been_at = 3
                 exact_breeze = 1
+
                 for been in range(3):
+                    min_action = None
+                    min_been_score = 1000
                     for direction in shuffled_directions:
                         potential_action = 'move', curr_hero, direction
                         destination_KB = self.map_dict[t_add(self.directions[direction], curr_hero_coor)]
-                        if destination_KB.breeze_around == exact_breeze and self.is_ok_move(curr_hero, curr_hero_coor, direction, partial_map,
+                        if destination_KB.breeze_around == exact_breeze and (not destination_KB.SAFE) and self.is_ok_move(curr_hero, curr_hero_coor, direction, partial_map,
                                                                                             max_breeze, been, max_stench, been):
-                            self.update_after_move(potential_action)
-                            #print(f"chose from 2nd priority with {exact_breeze} breeze")
-                            return potential_action
+                            been_score = 0.7*destination_KB.been_at[curr_hero] + 0.2*sum(destination_KB.been_at.values())
+                            ###print(f"last dirction is {self.last_action[2]} now is {direction}, oposiote {opposite_direction(direction)}")
+                            if self.last_action[2] == opposite_direction(direction):
+                                been_score += 0.6
+                                ##print("penalty for going back")
+                            ###print(f"been score for going to {t_add(self.directions[direction], curr_hero_coor)} is {been_score} ")
+                            if been_score < min_been_score:
+                                min_action = potential_action
+                                min_been_score = been_score
+                    if min_action is not None:
+                        ###print(f"chose to go to {min_action[2]}")
+                        self.update_after_move(min_action)
+                        destination_KB = self.map_dict[t_add(self.directions[min_action[2]], curr_hero_coor)]
+                        ##print(f"chose from 2nd priority with {exact_breeze} breeze cuz {destination_KB.breeze_around} is the breeze around desination which is {t_add(self.directions[min_action[2]], curr_hero_coor)}")
+                        return min_action
 
+        min_action = None
+        min_been_score = 1000
         for direction in shuffled_directions:
             potential_action = 'move', curr_hero, direction
             destination_KB = self.map_dict[t_add(self.directions[direction], curr_hero_coor)]
             if destination_KB.breeze_around == exact_breeze and self.is_ok_move(curr_hero, curr_hero_coor, direction, partial_map, max_breeze, max_been_at, max_stench, max_been_at):
-                self.update_after_move(potential_action)
-                #print(f"chose from 2nd priority with {exact_breeze} breeze")
-                return potential_action
+                been_score = destination_KB.been_at[curr_hero] + 0.5 * sum(destination_KB.been_at.values())
+                ###print(f"last dirction is {self.last_action[2]} now is {direction}, oposiote {opposite_direction(direction)}")
+                if self.last_action[2] == opposite_direction(direction):
+                    been_score += 0.6
+                    ##print("penalty for going back")
+
+                ###print(f"been score for going to {t_add(self.directions[direction], curr_hero_coor)} is {been_score} ")
+
+                if been_score < min_been_score:
+                    min_action = potential_action
+                    min_been_score = been_score
 
             if self.is_ok_move(curr_hero, curr_hero_coor, direction, partial_map, max_breeze, max_been_at, max_stench, max_been_at):
-                self.update_after_move(potential_action)
-                #print("chose from 2nd priority")
-                return potential_action
+                been_score = destination_KB.been_at[curr_hero] + 0.5 * sum(destination_KB.been_at.values())
+                if self.last_action[2] == opposite_direction(direction):
+                    been_score += 0.6
+                    ##print("penalty for going back")
 
-        # --------------- 3rd priority action(switching hero&doing 1st priority) --------------- #
+                ###print(f"been score for going to {t_add(self.directions[direction], curr_hero_coor)} is {been_score} ")
+
+                if been_score < min_been_score:
+                    min_action = potential_action
+                    min_been_score = been_score
+
+        if min_action is not None:
+            self.update_after_move(min_action)
+            ##print("chose from 2nd priority")
+            return min_action
+
+        # --------------- 3rd priority action(risking some hero if there's another) --------------- #
+
+        if self.can_risk:
+            ##print("gonna risk")
+            min_risk = 1000  # random big num
+            chosen_action = 'no_action'
+            min_been_score = 1000
+            for direction in shuffled_directions:
+                destination = t_add(curr_hero_coor, self.directions[direction])
+                destination_KB = self.map_dict[destination]
+                curr_risk = destination_KB.breeze_around+destination_KB.stench_around
+                if curr_risk < min_risk and not (destination_KB.WALL or 11 <= partial_map[destination[0]-1][destination[1]-1] <= 14):
+                    min_risk = curr_risk
+                    chosen_action = 'move', curr_hero, direction
+                if curr_risk == min_risk and not (destination_KB.WALL or 11 <= partial_map[destination[0]-1][destination[1]-1] <= 14):
+                    been_score = destination_KB.been_at[curr_hero] + 0.5 * sum(destination_KB.been_at.values())
+                    if self.last_action[2] == opposite_direction(direction):
+                        been_score += 0.6
+                        ##print("penalty for going back")
+
+                    ###print(f"been score for going to {t_add(self.directions[direction], curr_hero_coor)} is {been_score}")
+                    if been_score < min_been_score:
+                        chosen_action = 'move', curr_hero, direction
+                        min_been_score = been_score
+            if chosen_action != 'no_action':
+                self.update_after_move(chosen_action)
+                ##print("chose from 3rd")
+                return chosen_action
+
+        # --------------- 4th priority action(switching hero&doing 1st priority) --------------- #
 
         other_hero = None
         if len(self.heroes) > 1:
@@ -309,62 +387,95 @@ class WumpusController:
                     ##print(f"switched to hero {other_hero}")
                     continue
         if other_hero is not None:
+            ##print("chose another hero")
+            min_action = None
+            min_been_score = 1000
             for direction in shuffled_directions:
                 potential_action = 'move', other_hero, direction
-                if self.is_ok_move(other_hero, other_hero_coor, direction, partial_map, 0, 0, 0, 0):
-                    self.update_after_move(potential_action)
-                    #print("chose from 3rd")
-                    return potential_action
+                destination_KB = self.map_dict[t_add(self.directions[direction], other_hero_coor)]
+                if self.is_ok_move(other_hero, other_hero_coor, direction, partial_map, 1, 3, 0, 4):
+                    been_score = destination_KB.been_at[other_hero] + 0.5 * sum(destination_KB.been_at.values())
+                    if self.last_action[2] == opposite_direction(direction):
+                        been_score += 0.6
+                        ##print("penalty for going back")
+
+                    ##print(f"been score for going to {t_add(self.directions[direction], curr_hero_coor)} is {been_score} ")
+                    if been_score < min_been_score:
+                        min_action = potential_action
+                        min_been_score = been_score
+
+            if min_action is not None:
+                self.update_after_move(min_action)
+                ##print("chose from 4th")
+                return min_action
                 #else:
-                    ##print(f"{potential_action} didn't seem safe")
+                    ###print(f"{potential_action} didn't seem safe")
 
-        # --------------- 4th priority action(suicidal if there's more than one hero left) --------------- #
-
-        if self.can_risk:
-            min_risk = 1000  # random big num
-            chosen_action = 'no_action'
-            for direction in shuffled_directions:
-                destination = t_add(curr_hero_coor, self.directions[direction])
-                destination_KB = self.map_dict[destination]
-                curr_risk = destination_KB.breeze_around+destination_KB.stench_around
-                if curr_risk < min_risk and not (destination_KB.WALL or 11 <= partial_map[destination[0]-1][destination[1]-1] <= 14):
-                    min_risk = curr_risk
-                    chosen_action = 'move', curr_hero, direction
-            if chosen_action != 'no_action':
-                self.update_after_move(chosen_action)
-                #print("chose from 4th")
-                return chosen_action
 
         # --------- Going random direction, avoiding possible pits --------- #
 
         for max_breeze in range(2, 5):
             for curr_hero in self.heroes.keys():
                 curr_hero_coor = self.heroes[curr_hero]
+                min_action = None
+                min_been_score = 1000
                 for direction in shuffled_directions:
                     curr_destination = t_add(self.directions[direction], curr_hero_coor)
-                    if self.map_dict[curr_destination].WALL or (11 <= partial_map[curr_destination[0]-1][curr_destination[1]-1] <= 14)\
-                            or self.map_dict[curr_destination].breeze_around >= max_breeze or self.map_dict[curr_destination].been_at[curr_hero] >= 3 or self.map_dict[curr_destination].PIT:
+                    destination_KB = self.map_dict[curr_destination]
+                    if destination_KB.WALL or (11 <= partial_map[curr_destination[0]-1][curr_destination[1]-1] <= 14)\
+                            or destination_KB.breeze_around >= max_breeze or destination_KB.been_at[curr_hero] >= 3 or destination_KB.PIT:
                         continue
-                    if self.map_dict[curr_destination].P_PIT:
-                        #print(f"i said that {curr_destination} is probably a pit")
+                    if destination_KB.P_PIT or (destination_KB.stench_around >= 1.0*max_breeze/2 and not destination_KB.SAFE):
+                        ##print(f"i said that {curr_destination} is probably a pit or there's stench >= {1.0*max_breeze/2} and it says {destination_KB.stench_around}")
                         continue
                     action = 'move', curr_hero, direction
-                    self.update_after_move(action)
+                    been_score = destination_KB.been_at[curr_hero] + 0.5 * sum(destination_KB.been_at.values())
+                    if self.last_action[2] == opposite_direction(direction):
+                        been_score += 0.6
+                        ##print("penalty for going back")
+
+                    if been_score < min_been_score:
+                        min_action = action
+                        min_been_score = been_score
+
+                if min_action is not None:
+                    self.update_after_move(min_action)
                     #print(f"max breeze is {max_breeze}")
-                    return action  # just default to see how it runs
+                    return min_action  # just default to see how it runs
 
         # in case no action chosen:
+        min_action = None
+        min_been_score = 1000
         for direction in shuffled_directions:
             curr_destination = t_add(self.directions[direction], curr_hero_coor)
+            destination_KB = self.map_dict[curr_destination]
             if self.map_dict[curr_destination].WALL or (11 <= partial_map[curr_destination[0] - 1][curr_destination[1] - 1] <= 14) \
                     or self.map_dict[curr_destination].breeze_around >= 5 or self.map_dict[curr_destination].been_at[curr_hero] >= 4 or self.map_dict[curr_destination].PIT:
                 continue
             action = 'move', curr_hero, direction
-            self.update_after_move(action)
-            #print("pushed to the end")
-            return action  # just default to see how it runs
+            been_score = destination_KB.been_at[curr_hero] + 0.5 * sum(destination_KB.been_at.values())
+            if self.last_action[2] == opposite_direction(direction):
+                been_score += 0.6
+                #print("penalty for going back")
 
-        print("really pushed to the endd")
-        return 'move', list(self.heroes)[1], 'R'
+            if been_score < min_been_score:
+                min_action = action
+                min_been_score = been_score
+
+        if min_action is not None:
+            self.update_after_move(min_action)
+            ##print("pushed to the end")
+            return min_action  # just default to see how it runs
+
+        #print("really pushed to the end")
+        for direction in shuffled_directions:
+            curr_destination = t_add(self.directions[direction], curr_hero_coor)
+            potential_action = 'move', curr_hero, direction
+            if self.map_dict[curr_destination].WALL or (11 <= partial_map[curr_destination[0] - 1][curr_destination[1] - 1] <= 14):
+                continue
+            return potential_action
+
+        #print("reeeeeaaallly pushed to the end:")
+        return 'move', curr_hero, 'R'
         # TODO: before returning next, let's update been_at for the KBs and "came_from"
         # Timeout: 5 seconds
